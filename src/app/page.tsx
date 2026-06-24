@@ -111,16 +111,24 @@ export default function HomePage() {
   const [hoveredPreset, setHoveredPreset] = useState<string | null>(null);
 
   const readFiles = useCallback(async (fileList: FileList) => {
+    console.log("Files received:", fileList.length);
     const results: UploadedFile[] = [];
     for (const file of Array.from(fileList)) {
+      console.log("Processing file:", file.name);
       if (file.name.match(/\.(ts|tsx|js|jsx|mjs|cjs|json|css|md)$/)) {
+        console.log("File matches pattern:", file.name);
         const content = await file.text();
         results.push({ name: file.name, content, path: file.name });
+      } else {
+        console.log("File skipped (wrong extension):", file.name);
       }
     }
+    console.log("Total files to add:", results.length);
     setUploadedFiles((prev) => {
       const names = new Set(prev.map((f) => f.name));
-      return [...prev, ...results.filter((f) => !names.has(f.name))];
+      const filtered = results.filter((f) => !names.has(f.name));
+      console.log("Adding to state:", filtered.length);
+      return [...prev, ...filtered];
     });
   }, []);
 
@@ -215,6 +223,7 @@ export default function HomePage() {
               setIsDragging(true);
             }}
             onDragLeave={() => setIsDragging(false)}
+            onClick={() => document.getElementById("file-input")?.click()}
             className={`relative border-2 border-dashed rounded-2xl p-12 text-center transition-all cursor-pointer group overflow-hidden ${
               isDragging
                 ? "border-accent bg-accent/15 scale-105"
@@ -223,24 +232,21 @@ export default function HomePage() {
           >
             {/* Animated background for drop zone */}
             <motion.div
-              className="absolute inset-0 bg-gradient-to-br from-accent/0 via-accent/5 to-accent/0"
+              className="absolute inset-0 bg-gradient-to-br from-accent/0 via-accent/5 to-accent/0 pointer-events-none"
               animate={isDragging ? { opacity: [0.5, 1, 0.5] } : { opacity: 0 }}
               transition={{ duration: 1, repeat: Infinity }}
             />
 
             <input
+              id="file-input"
               type="file"
               multiple
               accept=".ts,.tsx,.js,.jsx,.mjs,.cjs,.json,.css,.md"
               onChange={handleFileInput}
-              className="absolute inset-0 opacity-0 cursor-pointer"
+              className="hidden"
             />
 
-            <motion.div
-              animate={isDragging ? { y: -8 } : { y: 0 }}
-              transition={{ type: "spring", stiffness: 200 }}
-              className="relative z-10"
-            >
+            <div className="relative z-10 pointer-events-none">
               <motion.div
                 animate={{ scale: isDragging ? 1.2 : 1 }}
                 transition={{ type: "spring", stiffness: 200 }}
@@ -254,7 +260,7 @@ export default function HomePage() {
               <p className="text-text-dim text-sm">
                 or click to browse — supports .ts .tsx .js .jsx .json .css .md
               </p>
-            </motion.div>
+            </div>
           </motion.div>
 
           {/* Uploaded files with staggered animation */}
@@ -394,7 +400,7 @@ export default function HomePage() {
             transition={{ delay: 0.6 }}
             className="text-center text-text-dim text-xs mt-8"
           >
-            Powered by Claude API • All processing runs locally on your machine
+            Powered by Ollama • All processing runs locally on your machine
           </motion.p>
         </div>
       </div>
