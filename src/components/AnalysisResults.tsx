@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle, AlertCircle, Zap, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle, TrendingUp, Zap } from "lucide-react";
 import { AnalysisResult } from "@/store/migrationStore";
 
 const complexityColors = {
@@ -16,7 +16,14 @@ const complexityBg = {
   high: "bg-danger/10 border-danger/30",
 };
 
-export function AnalysisResults({ result }: { result: AnalysisResult }) {
+type AnalysisResultsProps = {
+  result: AnalysisResult;
+};
+
+/**
+ * Renders summary cards and file analysis results.
+ */
+export function AnalysisResults({ result }: AnalysisResultsProps) {
   const container = {
     hidden: { opacity: 0 },
     show: {
@@ -40,7 +47,6 @@ export function AnalysisResults({ result }: { result: AnalysisResult }) {
       animate="show"
       className="space-y-6"
     >
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <motion.div
           variants={item}
@@ -101,7 +107,6 @@ export function AnalysisResults({ result }: { result: AnalysisResult }) {
         </motion.div>
       </div>
 
-      {/* Detected Patterns */}
       <motion.div
         variants={item}
         className="bg-surface/60 border border-border rounded-xl p-6 backdrop-blur"
@@ -125,7 +130,6 @@ export function AnalysisResults({ result }: { result: AnalysisResult }) {
         </div>
       </motion.div>
 
-      {/* Files Breakdown */}
       <motion.div variants={item}>
         <h3 className="text-text font-semibold mb-4">File Analysis</h3>
         <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -143,7 +147,7 @@ export function AnalysisResults({ result }: { result: AnalysisResult }) {
                     {file.name}
                   </p>
                   <p className="text-xs text-text-dim mt-1">
-                    {file.lines} lines • {file.language}
+                    {file.lines} lines - {file.language}
                   </p>
                 </div>
                 <span

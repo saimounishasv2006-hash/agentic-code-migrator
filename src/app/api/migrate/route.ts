@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
+type MigrateRequestBody = {
+  fileName?: string;
+  fileContent?: string;
+  migrationGoal?: string;
+  context?: string;
+};
+
+type MigrateResponseBody = {
+  fileName: string;
+  originalFileName: string;
+  originalCode: string;
+  rewrittenCode: string;
+  success: true;
+};
+
+type OllamaResponse = {
+  response?: string;
+};
+
 const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
 const MODEL = "codellama:7b";
 
+/**
+ * Sends a prompt to Ollama and returns the generated response text.
+ */
 async function callOllama(prompt: string): Promise<string> {
   try {
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
@@ -17,16 +39,25 @@ async function callOllama(prompt: string): Promise<string> {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama error: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `Ollama request failed with ${response.status}: ${errorText || response.statusText}`,
+      );
     }
 
-    const data = await response.json();
-    return data.response || "";
+    const data = (await response.json()) as OllamaResponse;
+    return data.response ?? "";
   } catch (error) {
-    throw new Error(`Ollama connection failed. Make sure Ollama is running.`);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(
+      `Ollama connection failed. Make sure Ollama is running. ${message}`,
+    );
   }
 }
 
+/**
+ * Returns a migrated file name when the migration targets TypeScript.
+ */
 function getNewFileName(
   originalFileName: string,
   migrationGoal: string,
@@ -36,19 +67,18 @@ function getNewFileName(
     lowerGoal.includes("typescript") || lowerGoal.includes("to ts");
 
   if (isTypeScriptMigration) {
-    // .js → .ts
     if (originalFileName.endsWith(".js")) {
       return originalFileName.replace(/\.js$/, ".ts");
     }
-    // .jsx → .tsx
+
     if (originalFileName.endsWith(".jsx")) {
       return originalFileName.replace(/\.jsx$/, ".tsx");
     }
-    // .mjs → .mts
+
     if (originalFileName.endsWith(".mjs")) {
       return originalFileName.replace(/\.mjs$/, ".mts");
     }
-    // .cjs → .cts
+
     if (originalFileName.endsWith(".cjs")) {
       return originalFileName.replace(/\.cjs$/, ".cts");
     }
@@ -57,9 +87,16 @@ function getNewFileName(
   return originalFileName;
 }
 
-export async function POST(req: NextRequest) {
+/**
+ * Handles single-file rewrite requests.
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const { fileName, fileContent, migrationGoal, context } = await req.json();
+    const body = (await req.json()) as MigrateRequestBody;
+    const fileName = body.fileName;
+    const fileContent = body.fileContent;
+    const migrationGoal = body.migrationGoal ?? "";
+    const context = body.context ?? "";
 
     if (!fileName || !fileContent) {
       return NextResponse.json(
@@ -79,19 +116,21 @@ ${fileContent}
 
 Context: ${context}
 
-Output ONLY the rewritten code, no explanations, no markdown.`;
+Output only the rewritten code, without explanations or markdown.`;
 
     const rewrittenCode = await callOllama(prompt);
 
-    return NextResponse.json({
+    const response: MigrateResponseBody = {
       fileName: newFileName,
       originalFileName: fileName,
       originalCode: fileContent,
       rewrittenCode,
       success: true,
-    });
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error("Migrate error:", error);
+    console.error("Rewrite request failed:", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Rewrite failed",

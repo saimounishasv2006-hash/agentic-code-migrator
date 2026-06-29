@@ -1,8 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 
+type AnalysisFile = {
+  name: string;
+  lines: number;
+  complexity: string;
+};
+
+type PlanAnalysis = {
+  filesAnalyzed: AnalysisFile[];
+  codePatterns: string[];
+  overallComplexity: string;
+};
+
+type PlanRequestBody = {
+  analysis?: PlanAnalysis;
+  migrationGoal?: string;
+};
+
+type MigrationPlanResponse = {
+  steps: Array<{
+    stepNumber: number;
+    title: string;
+    description: string;
+    affectedFiles: string[];
+    changes: string[];
+    reasoning: string;
+    estimatedTime: string;
+  }>;
+  totalSteps: number;
+  overallStrategy: string;
+};
+
+type OllamaResponse = {
+  response?: string;
+};
+
 const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
 const MODEL = "codellama:7b";
 
+/**
+ * Sends a prompt to Ollama and returns the generated response text.
+ */
 async function callOllama(prompt: string): Promise<string> {
   try {
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
@@ -17,39 +55,48 @@ async function callOllama(prompt: string): Promise<string> {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama error: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `Ollama request failed with ${response.status}: ${errorText || response.statusText}`,
+      );
     }
 
-    const data = await response.json();
-    return data.response || "";
+    const data = (await response.json()) as OllamaResponse;
+    return data.response ?? "";
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(
-      `Ollama connection failed at ${OLLAMA_API}. Make sure Ollama is running.`,
+      `Ollama connection failed at ${OLLAMA_API}. Make sure Ollama is running. ${message}`,
     );
   }
 }
 
-function cleanJSON(jsonString: string): string {
-  // Remove single-line comments (// ...)
-  let cleaned = jsonString.replace(/\/\/.*$/gm, "");
+/**
+ * Extracts the first JSON object from model output.
+ */
+function extractJson(responseText: string): string | null {
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return null;
+  }
 
-  // Remove multi-line comments (/* ... */)
+  let cleaned = jsonMatch[0].replace(/\/\/.*$/gm, "");
   cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, "");
-
-  // Remove trailing commas before } and ]
   cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
-
-  // Clean up extra whitespace
   cleaned = cleaned.replace(/\s+/g, " ");
-
   return cleaned;
 }
 
-export async function POST(req: NextRequest) {
+/**
+ * Handles migration plan generation requests.
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const { analysis, migrationGoal } = await req.json();
+    const body = (await req.json()) as PlanRequestBody;
+    const analysis = body.analysis;
+    const migrationGoal = body.migrationGoal ?? "";
 
-    if (!analysis) {
+    if (!analysis || !Array.isArray(analysis.filesAnalyzed)) {
       return NextResponse.json(
         { error: "No analysis provided" },
         { status: 400 },
@@ -57,7 +104,7 @@ export async function POST(req: NextRequest) {
     }
 
     const filesList = analysis.filesAnalyzed
-      .map((f: any) => `- ${f.name} (${f.lines} lines, ${f.complexity})`)
+      .map((file) => `- ${file.name} (${file.lines} lines, ${file.complexity})`)
       .join("\n");
 
     const prompt = `Create a migration plan for: "${migrationGoal}"
@@ -85,28 +132,22 @@ Create an ordered migration plan. Respond ONLY with valid JSON (no comments, no 
 }`;
 
     const responseText = await callOllama(prompt);
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    const cleanedJson = extractJson(responseText);
 
-    if (!jsonMatch) {
-      console.error("Ollama response:", responseText);
+    if (!cleanedJson) {
       throw new Error("Failed to find JSON in response");
     }
 
-    // Clean the JSON before parsing
-    const cleanedJSON = cleanJSON(jsonMatch[0]);
-
-    let plan;
+    let plan: MigrationPlanResponse;
     try {
-      plan = JSON.parse(cleanedJSON);
-    } catch (parseError) {
-      console.error("JSON parse error:", parseError);
-      console.error("Cleaned JSON:", cleanedJSON);
+      plan = JSON.parse(cleanedJson) as MigrationPlanResponse;
+    } catch {
       throw new Error("Failed to parse plan as valid JSON");
     }
 
     return NextResponse.json(plan);
   } catch (error) {
-    console.error("Plan error:", error);
+    console.error("Plan request failed:", error);
     return NextResponse.json(
       {
         error:

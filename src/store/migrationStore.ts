@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+export type ComplexityLevel = "low" | "medium" | "high";
+
 export type MigrationStep = {
   stepNumber: number;
   title: string;
@@ -8,6 +10,14 @@ export type MigrationStep = {
   changes: string[];
   reasoning: string;
   estimatedTime: string;
+};
+
+export type FileAnalysis = {
+  name: string;
+  language: string;
+  complexity: ComplexityLevel;
+  lines: number;
+  keyPatterns: string[];
 };
 
 export type MigrationPlan = {
@@ -25,14 +35,8 @@ export type UploadedFile = {
 export type AnalysisResult = {
   totalFiles: number;
   codePatterns: string[];
-  filesAnalyzed: Array<{
-    name: string;
-    language: string;
-    complexity: "low" | "medium" | "high";
-    lines: number;
-    keyPatterns: string[];
-  }>;
-  overallComplexity: "low" | "medium" | "high";
+  filesAnalyzed: FileAnalysis[];
+  overallComplexity: ComplexityLevel;
   estimatedEffort: string;
 };
 
@@ -54,11 +58,18 @@ type MigrationStore = {
   setFiles: (files: UploadedFile[]) => void;
   setMigrationGoal: (goal: string) => void;
   setPhase: (phase: AgentPhase) => void;
-  setAnalysisResult: (result: AnalysisResult) => void;
-  setMigrationPlan: (plan: MigrationPlan) => void;
+  setAnalysisResult: (result: AnalysisResult | null) => void;
+  setMigrationPlan: (plan: MigrationPlan | null) => void;
   addLog: (message: string) => void;
   reset: () => void;
 };
+
+/**
+ * Returns a timestamp for log entries.
+ */
+function getLogTimestamp(): string {
+  return new Date().toLocaleTimeString();
+}
 
 export const useMigrationStore = create<MigrationStore>((set) => ({
   files: [],
@@ -74,10 +85,7 @@ export const useMigrationStore = create<MigrationStore>((set) => ({
   setMigrationPlan: (plan) => set({ migrationPlan: plan }),
   addLog: (message) =>
     set((state) => ({
-      agentLog: [
-        ...state.agentLog,
-        `[${new Date().toLocaleTimeString()}] ${message}`,
-      ],
+      agentLog: [...state.agentLog, `[${getLogTimestamp()}] ${message}`],
     })),
   reset: () =>
     set({

@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
+type ValidateRequestBody = {
+  fileName?: string;
+  rewrittenCode?: string;
+  originalCode?: string;
+  migrationGoal?: string;
+};
+
+type ValidationResult = {
+  fileName: string;
+  passed: boolean;
+  score: number;
+  issues: string[];
+  summary: string;
+};
+
+type OllamaResponse = {
+  response?: string;
+};
+
 const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
 const MODEL = "codellama:7b";
 
+/**
+ * Sends a prompt to Ollama and returns the generated response text.
+ */
 async function callOllama(prompt: string): Promise<string> {
   try {
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
@@ -17,24 +39,36 @@ async function callOllama(prompt: string): Promise<string> {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama error: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `Ollama request failed with ${response.status}: ${errorText || response.statusText}`,
+      );
     }
 
-    const data = await response.json();
-    return data.response || "";
+    const data = (await response.json()) as OllamaResponse;
+    return data.response ?? "";
   } catch (error) {
-    throw new Error(`Ollama connection failed. Make sure Ollama is running.`);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(
+      `Ollama connection failed. Make sure Ollama is running. ${message}`,
+    );
   }
 }
 
-export async function POST(req: NextRequest) {
+/**
+ * Handles validation requests for rewritten files.
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const { fileName, rewrittenCode, originalCode, migrationGoal } =
-      await req.json();
+    const body = (await req.json()) as ValidateRequestBody;
+    const fileName = body.fileName;
+    const rewrittenCode = body.rewrittenCode;
+    const originalCode = body.originalCode;
+    const migrationGoal = body.migrationGoal ?? "";
 
-    if (!fileName || !rewrittenCode) {
+    if (!fileName || !rewrittenCode || !originalCode) {
       return NextResponse.json(
-        { error: "Missing fileName or rewrittenCode" },
+        { error: "Missing fileName, rewrittenCode, or originalCode" },
         { status: 400 },
       );
     }
@@ -57,7 +91,7 @@ Check for:
 3. Incomplete migration (leftover old patterns)
 4. Breaking changes
 
-Respond ONLY with JSON (no markdown):
+Respond only with JSON (no markdown):
 {
   "fileName": "${fileName}",
   "passed": true|false,
@@ -70,14 +104,13 @@ Respond ONLY with JSON (no markdown):
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
     if (!jsonMatch) {
-      console.error("Ollama response:", responseText);
       throw new Error("Failed to parse validation as JSON");
     }
 
-    const validation = JSON.parse(jsonMatch[0]);
+    const validation = JSON.parse(jsonMatch[0]) as ValidationResult;
     return NextResponse.json(validation);
   } catch (error) {
-    console.error("Validate error:", error);
+    console.error("Validation request failed:", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Validation failed",

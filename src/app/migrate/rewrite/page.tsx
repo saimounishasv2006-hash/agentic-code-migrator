@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { ArrowLeft, Check, Download, Loader, X } from "lucide-react";
 import { useMigrationStore } from "@/store/migrationStore";
-import { ArrowLeft, Loader, Download, Check, X } from "lucide-react";
 
 type RewriteResult = {
   fileName: string;
@@ -15,36 +15,50 @@ type RewriteResult = {
   error?: string;
 };
 
+type RewriteResponse = RewriteResult;
+
+/**
+ * Displays the rewrite step of the workflow.
+ */
 export default function RewritePage() {
   const router = useRouter();
   const { files, migrationPlan, migrationGoal, setPhase, addLog } =
     useMigrationStore();
-  const [currentFileIdx, setCurrentFileIdx] = useState(0);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const [results, setResults] = useState<RewriteResult[]>([]);
   const [isRewriting, setIsRewriting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!migrationPlan) router.push("/migrate/plan");
+    if (!migrationPlan) {
+      router.push("/migrate/plan");
+    }
   }, [migrationPlan, router]);
 
+  /**
+   * Rewrites each file in sequence and persists the generated output.
+   */
   const startRewrite = async () => {
+    if (!migrationPlan) {
+      return;
+    }
+
     setIsRewriting(true);
     setError(null);
     setPhase("migrating");
+    setResults([]);
 
     try {
-      for (let i = 0; i < files.length; i++) {
-        setCurrentFileIdx(i);
-        const file = files[i];
-        addLog(`Rewriting ${file.name}...`);
+      for (let index = 0; index < files.length; index += 1) {
+        setCurrentFileIndex(index);
+        const file = files[index];
+        addLog(`Rewriting ${file.name}.`);
 
-        // Get affected step info for context
-        const affectedSteps = migrationPlan?.steps.filter((s) =>
-          s.affectedFiles.includes(file.name),
+        const affectedSteps = migrationPlan.steps.filter((step) =>
+          step.affectedFiles.includes(file.name),
         );
         const context = affectedSteps
-          ?.map((s) => `${s.title}: ${s.description}`)
+          .map((step) => `${step.title}: ${step.description}`)
           .join(" | ");
 
         const response = await fetch("/api/migrate", {
@@ -62,54 +76,49 @@ export default function RewritePage() {
           throw new Error(`Failed to rewrite ${file.name}`);
         }
 
-        const result = await response.json();
-        setResults((prev) => [...prev, result]);
+        const result = (await response.json()) as RewriteResponse;
+        setResults((previousResults) => [...previousResults, result]);
 
-        // Store in sessionStorage for next phases
-        const stored = JSON.parse(
-          sessionStorage.getItem("rewrittenFiles") || "{}",
+        const storedFiles = JSON.parse(
+          sessionStorage.getItem("rewrittenFiles") ?? "{}",
         );
-        stored[result.fileName] = result.rewrittenCode;
-        sessionStorage.setItem("rewrittenFiles", JSON.stringify(stored));
+        storedFiles[result.fileName] = result.rewrittenCode;
+        sessionStorage.setItem("rewrittenFiles", JSON.stringify(storedFiles));
 
-        addLog(
-          `✓ Rewritten ${file.name}${
-            result.fileName !== file.name ? ` → ${result.fileName}` : ""
-          }`,
-        );
+        const renameNote =
+          result.fileName !== file.name ? ` to ${result.fileName}` : "";
+        addLog(`Rewritten ${file.name}${renameNote}.`);
       }
 
-      addLog("✓ All files rewritten!");
+      addLog("All files rewritten.");
       setPhase("done");
-      setIsRewriting(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      addLog(`✗ Error: ${msg}`);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Unknown error";
+      setError(message);
+      addLog(`Error: ${message}`);
       setPhase("idle");
+    } finally {
       setIsRewriting(false);
     }
   };
 
   const downloadFile = (result: RewriteResult) => {
-    const element = document.createElement("a");
-    const file = new Blob([result.rewrittenCode], { type: "text/plain" });
-    element.href = URL.createObjectURL(file);
-    element.download = result.fileName;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    const link = document.createElement("a");
+    const fileBlob = new Blob([result.rewrittenCode], { type: "text/plain" });
+    const url = URL.createObjectURL(fileBlob);
+
+    link.href = url;
+    link.download = result.fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const downloadAllFiles = () => {
     results.forEach((result) => {
-      const element = document.createElement("a");
-      const file = new Blob([result.rewrittenCode], { type: "text/plain" });
-      element.href = URL.createObjectURL(file);
-      element.download = result.fileName;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
+      downloadFile(result);
     });
   };
 
@@ -117,12 +126,12 @@ export default function RewritePage() {
     return null;
   }
 
-  const progress = Math.round((results.length / files.length) * 100);
+  const progress =
+    files.length > 0 ? Math.round((results.length / files.length) * 100) : 0;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-bg via-bg to-surface/30 px-6 py-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
+      <div className="mx-auto max-w-6xl">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -130,14 +139,14 @@ export default function RewritePage() {
         >
           <button
             onClick={() => router.push("/migrate/plan")}
-            className="flex items-center gap-2 text-text-dim hover:text-accent transition-colors mb-6"
+            className="mb-6 flex items-center gap-2 text-text-dim transition-colors hover:text-accent"
           >
             <ArrowLeft size={16} />
             Back
           </button>
 
           <div>
-            <h1 className="text-3xl font-bold text-text mb-2">Rewrite Code</h1>
+            <h1 className="mb-2 text-3xl font-bold text-text">Rewrite Code</h1>
             <p className="text-text-dim">
               Migrating{" "}
               <span className="text-accent">{files.length} files</span>
@@ -145,23 +154,22 @@ export default function RewritePage() {
           </div>
         </motion.div>
 
-        {/* Progress */}
         {isRewriting && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="mb-8"
           >
-            <div className="bg-surface/60 border border-border rounded-xl p-6 backdrop-blur">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-text font-semibold">
-                  Rewriting file {currentFileIdx + 1} of {files.length}
+            <div className="rounded-xl border border-border bg-surface/60 p-6 backdrop-blur">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="font-semibold text-text">
+                  Rewriting file {currentFileIndex + 1} of {files.length}
                 </p>
-                <span className="text-accent font-mono text-sm">
+                <span className="font-mono text-sm text-accent">
                   {progress}%
                 </span>
               </div>
-              <div className="w-full h-2 bg-bg rounded-full overflow-hidden">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
                 <motion.div
                   className="h-full bg-gradient-to-r from-accent to-accent-dim"
                   initial={{ width: 0 }}
@@ -169,8 +177,8 @@ export default function RewritePage() {
                   transition={{ duration: 0.5 }}
                 />
               </div>
-              <p className="text-text-dim text-xs mt-3">
-                {files[currentFileIdx]?.name}
+              <p className="mt-3 text-xs text-text-dim">
+                {files[currentFileIndex]?.name}
               </p>
             </div>
           </motion.div>
@@ -180,9 +188,9 @@ export default function RewritePage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-6"
+            className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-4"
           >
-            <p className="text-danger text-sm font-medium">{error}</p>
+            <p className="text-sm font-medium text-danger">{error}</p>
           </motion.div>
         )}
 
@@ -190,16 +198,16 @@ export default function RewritePage() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="bg-surface/60 border border-border rounded-xl p-8 backdrop-blur text-center"
+            className="rounded-xl border border-border bg-surface/60 p-8 text-center backdrop-blur"
           >
-            <p className="text-text-dim mb-6">
+            <p className="mb-6 text-text-dim">
               Ready to rewrite {files.length} files?
             </p>
             <motion.button
               onClick={startRewrite}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="inline-flex items-center gap-2 px-8 py-4 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-8 py-4 font-semibold text-white transition-colors hover:bg-accent-dim"
             >
               Start Rewriting
               <Loader size={16} />
@@ -207,40 +215,40 @@ export default function RewritePage() {
           </motion.div>
         ) : (
           <div className="space-y-4">
-            {results.map((result, idx) => (
+            {results.map((result, index) => (
               <motion.div
                 key={result.fileName}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.1 }}
-                className={`border rounded-xl p-5 ${
+                transition={{ delay: index * 0.1 }}
+                className={`rounded-xl border p-5 ${
                   result.success
-                    ? "bg-success/10 border-success/30"
-                    : "bg-danger/10 border-danger/30"
+                    ? "border-success/30 bg-success/10"
+                    : "border-danger/30 bg-danger/10"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1">
+                  <div className="flex flex-1 items-center gap-3">
                     {result.success ? (
-                      <Check size={20} className="text-success flex-shrink-0" />
+                      <Check size={20} className="flex-shrink-0 text-success" />
                     ) : (
-                      <X size={20} className="text-danger flex-shrink-0" />
+                      <X size={20} className="flex-shrink-0 text-danger" />
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-text font-medium">
+                        <span className="font-mono font-medium text-text">
                           {result.originalFileName}
                         </span>
                         {result.fileName !== result.originalFileName && (
                           <>
-                            <span className="text-text-dim">→</span>
-                            <span className="font-mono text-accent font-medium">
+                            <span className="text-text-dim">to</span>
+                            <span className="font-mono font-medium text-accent">
                               {result.fileName}
                             </span>
                           </>
                         )}
                       </div>
-                      <p className="text-text-dim text-xs mt-1">
+                      <p className="mt-1 text-xs text-text-dim">
                         {result.rewrittenCode.length} bytes
                       </p>
                     </div>
@@ -250,14 +258,14 @@ export default function RewritePage() {
                       onClick={() => downloadFile(result)}
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
-                      className="p-2 hover:bg-success/20 rounded-lg transition-colors flex-shrink-0"
+                      className="flex-shrink-0 rounded-lg p-2 transition-colors hover:bg-success/20"
                     >
                       <Download size={16} className="text-success" />
                     </motion.button>
                   )}
                 </div>
                 {result.error && (
-                  <p className="text-danger text-sm mt-2">{result.error}</p>
+                  <p className="mt-2 text-sm text-danger">{result.error}</p>
                 )}
               </motion.div>
             ))}
@@ -267,14 +275,14 @@ export default function RewritePage() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.5 }}
-                className="flex gap-4 mt-8"
+                className="mt-8 flex gap-4"
               >
                 <button
                   onClick={() => {
                     setResults([]);
-                    setCurrentFileIdx(0);
+                    setCurrentFileIndex(0);
                   }}
-                  className="flex-1 px-6 py-3 border border-border text-text rounded-lg hover:border-accent hover:text-accent transition-colors font-medium"
+                  className="flex-1 rounded-lg border border-border px-6 py-3 font-medium text-text transition-colors hover:border-accent hover:text-accent"
                 >
                   Start Over
                 </button>
@@ -282,7 +290,7 @@ export default function RewritePage() {
                   onClick={downloadAllFiles}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim"
                 >
                   <Download size={16} />
                   Download All

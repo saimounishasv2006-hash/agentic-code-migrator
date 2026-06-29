@@ -1,11 +1,18 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { CheckCircle2, ChevronRight, Clock, FileCode2 } from "lucide-react";
-import { MigrationPlan, MigrationStep } from "@/store/migrationStore";
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { ChevronRight, Clock, FileCode2 } from "lucide-react";
+import { MigrationPlan } from "@/store/migrationStore";
 
-export function PlanStepper({ plan }: { plan: MigrationPlan }) {
+type PlanStepperProps = {
+  plan: MigrationPlan;
+};
+
+/**
+ * Renders the ordered migration steps and their details.
+ */
+export function PlanStepper({ plan }: PlanStepperProps) {
   const [expandedStep, setExpandedStep] = useState<number | null>(0);
 
   const container = {
@@ -31,7 +38,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
       animate="show"
       className="space-y-6"
     >
-      {/* Strategy Overview */}
       <motion.div
         variants={item}
         className="bg-surface/60 border border-border rounded-xl p-6 backdrop-blur"
@@ -45,7 +51,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
         </p>
       </motion.div>
 
-      {/* Steps */}
       <div className="space-y-3">
         <p className="text-text-dim text-xs uppercase font-mono tracking-wider">
           {plan.totalSteps} Steps
@@ -65,7 +70,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                   : "bg-surface/60 border-border hover:border-accent/50"
               }`}
             >
-              {/* Header */}
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-4 flex-1">
                   <div className="flex-shrink-0 mt-1">
@@ -88,7 +92,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                   </div>
                 </div>
 
-                {/* Time Badge */}
                 <div className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-bg/60 border border-border/30">
                   <Clock size={12} className="text-text-dim" />
                   <span className="text-xs text-text-dim font-mono">
@@ -97,7 +100,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                 </div>
               </div>
 
-              {/* Expanded Content */}
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{
@@ -108,7 +110,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                 className="overflow-hidden"
               >
                 <div className="mt-4 pt-4 border-t border-border/30 space-y-4">
-                  {/* Affected Files */}
                   <div>
                     <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
                       Affected Files
@@ -128,7 +129,6 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                     </div>
                   </div>
 
-                  {/* Changes */}
                   <div>
                     <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
                       Changes
@@ -142,14 +142,13 @@ export function PlanStepper({ plan }: { plan: MigrationPlan }) {
                           transition={{ delay: 0.1 + i * 0.05 }}
                           className="flex items-start gap-2 text-sm text-text-dim"
                         >
-                          <span className="text-accent mt-1">→</span>
+                          <span className="text-accent mt-1">-</span>
                           <span>{change}</span>
                         </motion.li>
                       ))}
                     </ul>
                   </div>
 
-                  {/* Reasoning */}
                   <div>
                     <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
                       Why This Order

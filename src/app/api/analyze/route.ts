@@ -1,8 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
-const MODEL = "codellama:7b"; // Changed from qwen2.5:1.5b
+type SourceFile = {
+  name: string;
+  content: string;
+};
 
+type FileAnalysis = {
+  name: string;
+  language: string;
+  complexity: "low" | "medium" | "high";
+  lines: number;
+  keyPatterns: string[];
+};
+
+type AnalyzeRequestBody = {
+  files?: SourceFile[];
+  migrationGoal?: string;
+};
+
+type AnalysisResponse = {
+  totalFiles: number;
+  codePatterns: string[];
+  filesAnalyzed: FileAnalysis[];
+  overallComplexity: "low" | "medium" | "high";
+  estimatedEffort: string;
+};
+
+type OllamaResponse = {
+  response?: string;
+};
+
+const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
+const MODEL = "codellama:7b";
+
+/**
+ * Sends a prompt to Ollama and returns the generated response text.
+ */
 async function callOllama(prompt: string): Promise<string> {
   try {
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
@@ -17,35 +50,59 @@ async function callOllama(prompt: string): Promise<string> {
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama error: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(
+        `Ollama request failed with ${response.status}: ${errorText || response.statusText}`,
+      );
     }
 
-    const data = await response.json();
-    return data.response || "";
+    const data = (await response.json()) as OllamaResponse;
+    return data.response ?? "";
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(
-      `Ollama connection failed at ${OLLAMA_API}. Make sure Ollama is running: ollama serve`,
+      `Ollama connection failed at ${OLLAMA_API}. Make sure Ollama is running. ${message}`,
     );
   }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { files, migrationGoal } = await req.json();
+/**
+ * Extracts the first JSON object from model output.
+ */
+function extractJson(responseText: string): string | null {
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return null;
+  }
 
-    if (!files || !Array.isArray(files) || files.length === 0) {
+  let cleaned = jsonMatch[0].replace(/\/\/.*$/gm, "");
+  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, "");
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+  cleaned = cleaned.replace(/\s+/g, " ");
+  return cleaned;
+}
+
+/**
+ * Handles codebase analysis requests.
+ */
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    const body = (await req.json()) as AnalyzeRequestBody;
+    const files = Array.isArray(body.files) ? body.files : [];
+    const migrationGoal = body.migrationGoal ?? "";
+
+    if (files.length === 0) {
       return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
-    // Build file summary (analyze, don't paste entire content)
     const fileSummary = files
-      .map((f: { name: string; content: string }) => {
-        const lines = f.content.split("\n").length;
-        const imports = (f.content.match(/import |require\(/g) || []).length;
+      .map((file) => {
+        const lines = file.content.split("\n").length;
+        const imports = (file.content.match(/import |require\(/g) ?? []).length;
         const functions = (
-          f.content.match(/function |const \w+ = \(|=>/g) || []
+          file.content.match(/function |const \w+ = \(|=>/g) ?? []
         ).length;
-        return `- ${f.name}: ${lines} lines, ${imports} imports, ${functions} functions`;
+        return `- ${file.name}: ${lines} lines, ${imports} imports, ${functions} functions`;
       })
       .join("\n");
 
@@ -60,35 +117,38 @@ Respond ONLY with valid JSON (no markdown, no extra text):
   "codePatterns": ["pattern1", "pattern2", "pattern3"],
   "filesAnalyzed": [
 ${files
-  .map((f: { name: string; content: string }) => {
-    const lines = f.content.split("\n").length;
-    const lang = f.name.match(/\.(ts|tsx)$/)
+  .map((file) => {
+    const lines = file.content.split("\n").length;
+    const language = file.name.match(/\.(ts|tsx)$/)
       ? "typescript"
-      : f.name.match(/\.jsx?$/)
+      : file.name.match(/\.jsx?$/)
         ? "javascript"
-        : f.name.match(/\.json$/)
+        : file.name.match(/\.json$/)
           ? "json"
           : "other";
 
     let complexity: "low" | "medium" | "high" = "low";
-    if (lines > 300) complexity = "high";
-    else if (lines > 100) complexity = "medium";
+    if (lines > 300) {
+      complexity = "high";
+    } else if (lines > 100) {
+      complexity = "medium";
+    }
 
-    const hasClasses = /class \w+/.test(f.content);
-    const hasHooks = /useState|useEffect|useContext/.test(f.content);
-    const hasAsync = /async |await /.test(f.content);
+    const hasClasses = /class \w+/.test(file.content);
+    const hasHooks = /useState|useEffect|useContext/.test(file.content);
+    const hasAsync = /async |await /.test(file.content);
 
-    const patterns = [];
+    const patterns: string[] = [];
     if (hasClasses) patterns.push("class-components");
     if (hasHooks) patterns.push("react-hooks");
     if (hasAsync) patterns.push("async-await");
 
     return `    {
-      "name": "${f.name}",
-      "language": "${lang}",
+      "name": "${file.name}",
+      "language": "${language}",
       "complexity": "${complexity}",
       "lines": ${lines},
-      "keyPatterns": [${patterns.map((p) => `"${p}"`).join(", ")}]
+      "keyPatterns": [${patterns.map((pattern) => `"${pattern}"`).join(", ")}]
     }`;
   })
   .join(",\n")}
@@ -98,19 +158,16 @@ ${files
 }`;
 
     const responseText = await callOllama(prompt);
+    const cleanedJson = extractJson(responseText);
 
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("Ollama response:", responseText);
+    if (!cleanedJson) {
       throw new Error("Failed to parse Ollama response as JSON");
     }
 
-    const analysis = JSON.parse(jsonMatch[0]);
-
+    const analysis = JSON.parse(cleanedJson) as AnalysisResponse;
     return NextResponse.json(analysis);
   } catch (error) {
-    console.error("Analyze error:", error);
+    console.error("Analyze request failed:", error);
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Analysis failed",

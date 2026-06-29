@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useMigrationStore } from "@/store/migrationStore";
 import {
   ArrowLeft,
-  Loader,
-  CheckCircle2,
   AlertCircle,
+  CheckCircle2,
   ChevronRight,
+  Loader,
 } from "lucide-react";
+import { useMigrationStore } from "@/store/migrationStore";
 
 type ValidationResult = {
   fileName: string;
@@ -20,35 +20,52 @@ type ValidationResult = {
   summary: string;
 };
 
+type ValidationResponse = ValidationResult;
+
+/**
+ * Displays the validation step of the workflow.
+ */
 export default function ValidatePage() {
   const router = useRouter();
   const { files, migrationGoal, setPhase, addLog } = useMigrationStore();
-  const [rewrittenFiles, setRewrittenFiles] = useState
-    Map<string, string>
-  >(new Map());
-  const [validationResults, setValidationResults] = useState
+  const [rewrittenFiles] = useState<Map<string, string>>(() => {
+    if (typeof window === "undefined") {
+      return new Map();
+    }
+
+    const storedFiles = window.sessionStorage.getItem("rewrittenFiles");
+    if (!storedFiles) {
+      return new Map();
+    }
+
+    try {
+      const parsed = JSON.parse(storedFiles) as Record<string, string>;
+      return new Map(Object.entries(parsed));
+    } catch {
+      return new Map();
+    }
+  });
+  const [validationResults, setValidationResults] = useState<
     ValidationResult[]
   >([]);
   const [isValidating, setIsValidating] = useState(false);
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Get rewritten files from sessionStorage or previous page
   useEffect(() => {
-    const stored = sessionStorage.getItem("rewrittenFiles");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setRewrittenFiles(new Map(Object.entries(parsed)));
-      } catch (err) {
-        console.error("Failed to parse stored files:", err);
-      }
+    if (!migrationGoal) {
+      router.push("/migrate/rewrite");
     }
-  }, []);
+  }, [migrationGoal, router]);
 
+  /**
+   * Validates each rewritten file against the original source file.
+   */
   const startValidation = async () => {
     if (rewrittenFiles.size === 0) {
-      setError("No rewritten files found. Please complete Phase 4 first.");
+      setError(
+        "No rewritten files found. Please complete the rewrite step first.",
+      );
       return;
     }
 
@@ -60,17 +77,17 @@ export default function ValidatePage() {
     try {
       const entries = Array.from(rewrittenFiles.entries());
 
-      for (let i = 0; i < entries.length; i++) {
-        setCurrentIdx(i);
-        const [fileName, rewrittenCode] = entries[i];
-        const originalFile = files.find((f) => f.name === fileName);
+      for (let index = 0; index < entries.length; index += 1) {
+        setCurrentIndex(index);
+        const [fileName, rewrittenCode] = entries[index];
+        const originalFile = files.find((file) => file.name === fileName);
 
         if (!originalFile) {
-          addLog(`⚠ Skipping ${fileName} (original not found)`);
+          addLog(`Skipping ${fileName}; original file was not found.`);
           continue;
         }
 
-        addLog(`Validating ${fileName}...`);
+        addLog(`Validating ${fileName}.`);
 
         const response = await fetch("/api/validate", {
           method: "POST",
@@ -87,40 +104,60 @@ export default function ValidatePage() {
           throw new Error(`Validation failed for ${fileName}`);
         }
 
-        const result = await response.json();
-        setValidationResults((prev) => [...prev, result]);
+        const result = (await response.json()) as ValidationResponse;
+        setValidationResults((previousResults) => [...previousResults, result]);
 
         if (result.passed) {
-          addLog(`✓ ${fileName} passed validation (${result.score}%)`);
-        } else {
           addLog(
-            `⚠ ${fileName} has issues (${result.score}%) — ${result.issues.length} problem${result.issues.length > 1 ? "s" : ""}`
+            `${fileName} passed validation with a score of ${result.score}%.`,
+          );
+        } else {
+          const issueCount = result.issues.length;
+          addLog(
+            `${fileName} has issues with a score of ${result.score}%. ${issueCount} problem${issueCount === 1 ? "" : "s"}.`,
           );
         }
       }
 
-      addLog("✓ Validation complete!");
+      addLog("Validation complete.");
+      setPhase("done");
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Unknown error";
+      setError(message);
+      addLog(`Error: ${message}`);
       setPhase("idle");
-      setIsValidating(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      addLog(`✗ Error: ${msg}`);
-      setPhase("idle");
+    } finally {
       setIsValidating(false);
     }
   };
 
-  const passedCount = validationResults.filter((r) => r.passed).length;
-  const avgScore = Math.round(
-    validationResults.reduce((sum, r) => sum + r.score, 0) /
-      Math.max(validationResults.length, 1)
+  const passedCount = useMemo(
+    () => validationResults.filter((result) => result.passed).length,
+    [validationResults],
+  );
+
+  const averageScore = useMemo(() => {
+    if (validationResults.length === 0) {
+      return 0;
+    }
+
+    const totalScore = validationResults.reduce(
+      (sum, result) => sum + result.score,
+      0,
+    );
+    return Math.round(totalScore / validationResults.length);
+  }, [validationResults]);
+
+  const issueCount = useMemo(
+    () =>
+      validationResults.reduce((sum, result) => sum + result.issues.length, 0),
+    [validationResults],
   );
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-bg via-bg to-surface/30 px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
+      <div className="mx-auto max-w-4xl">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -128,44 +165,48 @@ export default function ValidatePage() {
         >
           <button
             onClick={() => router.push("/migrate/rewrite")}
-            className="flex items-center gap-2 text-text-dim hover:text-accent transition-colors mb-6"
+            className="mb-6 flex items-center gap-2 text-text-dim transition-colors hover:text-accent"
           >
             <ArrowLeft size={16} />
             Back
           </button>
 
           <div>
-            <h1 className="text-3xl font-bold text-text mb-2">
+            <h1 className="mb-2 text-3xl font-bold text-text">
               Validate Migration
             </h1>
             <p className="text-text-dim">
-              Check for errors and incomplete migrations
+              Check for errors and incomplete migrations.
             </p>
           </div>
         </motion.div>
 
-        {/* Progress */}
         {isValidating && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="mb-8"
           >
-            <div className="bg-surface/60 border border-border rounded-xl p-6 backdrop-blur">
-              <div className="flex items-center justify-between mb-4">
-                <p className="text-text font-semibold">
-                  Validating file {currentIdx + 1} of {rewrittenFiles.size}
+            <div className="rounded-xl border border-border bg-surface/60 p-6 backdrop-blur">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="font-semibold text-text">
+                  Validating file {currentIndex + 1} of {rewrittenFiles.size}
                 </p>
-                <span className="text-accent font-mono text-sm">
-                  {Math.round((currentIdx / rewrittenFiles.size) * 100)}%
+                <span className="font-mono text-sm text-accent">
+                  {rewrittenFiles.size > 0
+                    ? Math.round(
+                        ((currentIndex + 1) / rewrittenFiles.size) * 100,
+                      )
+                    : 0}
+                  %
                 </span>
               </div>
-              <div className="w-full h-2 bg-bg rounded-full overflow-hidden">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
                 <motion.div
                   className="h-full bg-gradient-to-r from-accent to-accent-dim"
                   initial={{ width: 0 }}
                   animate={{
-                    width: `${(currentIdx / rewrittenFiles.size) * 100}%`,
+                    width: `${rewrittenFiles.size > 0 ? ((currentIndex + 1) / rewrittenFiles.size) * 100 : 0}%`,
                   }}
                   transition={{ duration: 0.5 }}
                 />
@@ -178,9 +219,9 @@ export default function ValidatePage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-6"
+            className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-4"
           >
-            <p className="text-danger text-sm font-medium">{error}</p>
+            <p className="text-sm font-medium text-danger">{error}</p>
           </motion.div>
         )}
 
@@ -188,16 +229,17 @@ export default function ValidatePage() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="bg-surface/60 border border-border rounded-xl p-8 backdrop-blur text-center"
+            className="rounded-xl border border-border bg-surface/60 p-8 text-center backdrop-blur"
           >
-            <p className="text-text-dim mb-6">
-              Validate {rewrittenFiles.size} rewritten files?
+            <p className="mb-6 text-text-dim">
+              Validate {rewrittenFiles.size} rewritten file
+              {rewrittenFiles.size === 1 ? "" : "s"}?
             </p>
             <motion.button
               onClick={startValidation}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="inline-flex items-center gap-2 px-8 py-4 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-8 py-4 font-semibold text-white transition-colors hover:bg-accent-dim"
             >
               Start Validation
               <Loader size={16} className="animate-spin" />
@@ -205,14 +247,13 @@ export default function ValidatePage() {
           </motion.div>
         ) : validationResults.length > 0 ? (
           <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-surface/60 border border-border rounded-xl p-5 backdrop-blur"
+                className="rounded-xl border border-border bg-surface/60 p-5 backdrop-blur"
               >
-                <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
+                <p className="mb-2 text-xs uppercase tracking-wider font-mono text-text-dim">
                   Passed
                 </p>
                 <p className="text-3xl font-bold text-success">
@@ -224,44 +265,43 @@ export default function ValidatePage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="bg-surface/60 border border-border rounded-xl p-5 backdrop-blur"
+                className="rounded-xl border border-border bg-surface/60 p-5 backdrop-blur"
               >
-                <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
+                <p className="mb-2 text-xs uppercase tracking-wider font-mono text-text-dim">
                   Avg Score
                 </p>
-                <p className="text-3xl font-bold text-accent">{avgScore}%</p>
+                <p className="text-3xl font-bold text-accent">
+                  {averageScore}%
+                </p>
               </motion.div>
 
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="bg-surface/60 border border-border rounded-xl p-5 backdrop-blur"
+                className="rounded-xl border border-border bg-surface/60 p-5 backdrop-blur"
               >
-                <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-2">
+                <p className="mb-2 text-xs uppercase tracking-wider font-mono text-text-dim">
                   Issues Found
                 </p>
-                <p className="text-3xl font-bold text-warning">
-                  {validationResults.reduce((sum, r) => sum + r.issues.length, 0)}
-                </p>
+                <p className="text-3xl font-bold text-warning">{issueCount}</p>
               </motion.div>
             </div>
 
-            {/* Results */}
-            <div className="space-y-4 mb-8">
-              {validationResults.map((result, idx) => (
+            <div className="mb-8 space-y-4">
+              {validationResults.map((result, index) => (
                 <motion.div
                   key={result.fileName}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                  className={`border rounded-xl p-5 ${
+                  transition={{ delay: index * 0.05 }}
+                  className={`rounded-xl border p-5 ${
                     result.passed
-                      ? "bg-success/10 border-success/30"
-                      : "bg-warning/10 border-warning/30"
+                      ? "border-success/30 bg-success/10"
+                      : "border-warning/30 bg-warning/10"
                   }`}
                 >
-                  <div className="flex items-start justify-between mb-3">
+                  <div className="mb-3 flex items-start justify-between gap-4">
                     <div className="flex items-center gap-3">
                       {result.passed ? (
                         <CheckCircle2 size={20} className="text-success" />
@@ -269,10 +309,10 @@ export default function ValidatePage() {
                         <AlertCircle size={20} className="text-warning" />
                       )}
                       <div>
-                        <p className="font-mono text-text font-medium">
+                        <p className="font-mono font-medium text-text">
                           {result.fileName}
                         </p>
-                        <p className="text-text-dim text-xs mt-1">
+                        <p className="mt-1 text-xs text-text-dim">
                           {result.summary}
                         </p>
                       </div>
@@ -286,17 +326,17 @@ export default function ValidatePage() {
                   </div>
 
                   {result.issues.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-white/10">
-                      <p className="text-xs text-text-dim font-mono uppercase tracking-wider mb-2">
+                    <div className="mt-3 border-t border-white/10 pt-3">
+                      <p className="mb-2 text-xs uppercase tracking-wider font-mono text-text-dim">
                         Issues
                       </p>
                       <ul className="space-y-1">
-                        {result.issues.map((issue, i) => (
+                        {result.issues.map((issue, issueIndex) => (
                           <li
-                            key={i}
-                            className="text-sm text-text-dim flex items-start gap-2"
+                            key={`${result.fileName}-${issueIndex}`}
+                            className="flex items-start gap-2 text-sm text-text-dim"
                           >
-                            <span className="text-warning mt-1">•</span>
+                            <span className="mt-1 text-warning">-</span>
                             {issue}
                           </li>
                         ))}
@@ -307,7 +347,6 @@ export default function ValidatePage() {
               ))}
             </div>
 
-            {/* Next Button */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -317,9 +356,9 @@ export default function ValidatePage() {
                 onClick={() => router.push("/migrate/export")}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim"
               >
-                Next: Export & GitHub Prep
+                Next: Export and Finalize
                 <ChevronRight size={16} />
               </motion.button>
             </motion.div>

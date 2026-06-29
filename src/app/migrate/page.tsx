@@ -3,36 +3,46 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useMigrationStore } from "@/store/migrationStore";
+import { ArrowLeft, ChevronRight, Loader } from "lucide-react";
 import { AnalysisResults } from "@/components/AnalysisResults";
-import { ChevronRight, ArrowLeft, Loader } from "lucide-react";
+import { AnalysisResult, useMigrationStore } from "@/store/migrationStore";
 
+type AnalyzeResponse = AnalysisResult;
+
+/**
+ * Displays the analysis step of the migration workflow.
+ */
 export default function MigratePage() {
   const router = useRouter();
   const {
     files,
     migrationGoal,
-    phase,
     analysisResult,
     setPhase,
     setAnalysisResult,
     addLog,
+    agentLog,
   } = useMigrationStore();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!files.length) router.push("/");
-  }, [files, router]);
+    if (files.length === 0) {
+      router.push("/");
+    }
+  }, [files.length, router]);
 
+  /**
+   * Sends files to the analysis API and stores the result.
+   */
   const runAnalyze = async () => {
     setIsAnalyzing(true);
     setError(null);
     setPhase("analyzing");
-    addLog("Starting code analysis...");
+    addLog("Starting code analysis.");
 
     try {
-      addLog(`Analyzing ${files.length} files`);
+      addLog(`Analyzing ${files.length} files.`);
 
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -44,32 +54,30 @@ export default function MigratePage() {
         throw new Error(`Analysis failed: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      addLog(`✓ Found ${data.totalFiles} files`);
-      addLog(`✓ Detected ${data.codePatterns.length} patterns`);
-      addLog(`✓ Complexity: ${data.overallComplexity}`);
+      const data = (await response.json()) as AnalyzeResponse;
+      addLog(`Found ${data.totalFiles} files.`);
+      addLog(`Detected ${data.codePatterns.length} patterns.`);
+      addLog(`Complexity: ${data.overallComplexity}.`);
 
       setAnalysisResult(data);
-      setPhase("idle");
-      setIsAnalyzing(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      addLog(`✗ Error: ${msg}`);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Unknown error";
+      setError(message);
+      addLog(`Error: ${message}`);
+    } finally {
       setPhase("idle");
       setIsAnalyzing(false);
     }
   };
 
   const handleNext = () => {
-    // Phase 3 coming next
     router.push("/migrate/plan");
   };
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-bg via-bg to-surface/30 px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
+      <div className="mx-auto max-w-4xl">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -77,14 +85,14 @@ export default function MigratePage() {
         >
           <button
             onClick={() => router.push("/")}
-            className="flex items-center gap-2 text-text-dim hover:text-accent transition-colors mb-6"
+            className="mb-6 flex items-center gap-2 text-text-dim transition-colors hover:text-accent"
           >
             <ArrowLeft size={16} />
             Back
           </button>
 
           <div>
-            <h1 className="text-3xl font-bold text-text mb-2">Code Analysis</h1>
+            <h1 className="mb-2 text-3xl font-bold text-text">Code Analysis</h1>
             <p className="text-text-dim">
               Migration goal:{" "}
               <span className="text-accent">{migrationGoal.slice(0, 50)}</span>
@@ -93,29 +101,28 @@ export default function MigratePage() {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Agent Log Terminal */}
-          <motion.div
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+          <motion.aside
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
-            className="lg:col-span-1 bg-surface/60 border border-border rounded-xl p-4 backdrop-blur h-fit sticky top-8"
+            className="h-fit rounded-xl border border-border bg-surface/60 p-4 backdrop-blur lg:col-span-1 sticky top-8"
           >
-            <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-3">
+            <p className="mb-3 text-xs uppercase tracking-wider font-mono text-text-dim">
               Agent Log
             </p>
-            <div className="space-y-1.5 text-xs font-mono max-h-64 overflow-y-auto">
-              {useMigrationStore.getState().agentLog.length === 0 ? (
+            <div className="max-h-64 space-y-1.5 overflow-y-auto font-mono text-xs">
+              {agentLog.length === 0 ? (
                 <p className="text-text-dim/50">Waiting to analyze...</p>
               ) : (
-                useMigrationStore.getState().agentLog.map((log, i) => (
+                agentLog.map((logEntry, index) => (
                   <motion.p
-                    key={i}
+                    key={`${index}-${logEntry}`}
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="text-text-dim"
                   >
-                    <span className="text-accent">&gt;</span> {log}
+                    <span className="text-accent">&gt;</span> {logEntry}
                   </motion.p>
                 ))
               )}
@@ -124,15 +131,14 @@ export default function MigratePage() {
                   animate={{ opacity: [0.5, 1] }}
                   className="text-accent"
                 >
-                  <Loader size={12} className="inline mr-1 animate-spin" />
+                  <Loader size={12} className="mr-1 inline animate-spin" />
                   Processing...
                 </motion.p>
               )}
             </div>
-          </motion.div>
+          </motion.aside>
 
-          {/* Main Content */}
-          <motion.div
+          <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -142,9 +148,9 @@ export default function MigratePage() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-6"
+                className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-4"
               >
-                <p className="text-danger text-sm font-medium">{error}</p>
+                <p className="text-sm font-medium text-danger">{error}</p>
               </motion.div>
             )}
 
@@ -152,18 +158,18 @@ export default function MigratePage() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="bg-surface/60 border border-border rounded-xl p-8 backdrop-blur text-center"
+                className="rounded-xl border border-border bg-surface/60 p-8 text-center backdrop-blur"
               >
-                <p className="text-text-dim mb-6">
+                <p className="mb-6 text-text-dim">
                   Ready to analyze {files.length} file
-                  {files.length > 1 ? "s" : ""}?
+                  {files.length === 1 ? "" : "s"}?
                 </p>
                 <motion.button
                   onClick={runAnalyze}
                   disabled={isAnalyzing}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isAnalyzing ? (
                     <>
@@ -186,14 +192,14 @@ export default function MigratePage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1 }}
-                  className="flex gap-4 mt-8"
+                  className="mt-8 flex gap-4"
                 >
                   <button
                     onClick={() => {
                       setAnalysisResult(null);
-                      runAnalyze();
+                      void runAnalyze();
                     }}
-                    className="flex-1 px-6 py-3 border border-border text-text rounded-lg hover:border-accent hover:text-accent transition-colors font-medium"
+                    className="flex-1 rounded-lg border border-border px-6 py-3 font-medium text-text transition-colors hover:border-accent hover:text-accent"
                   >
                     Re-analyze
                   </button>
@@ -201,7 +207,7 @@ export default function MigratePage() {
                     onClick={handleNext}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim"
                   >
                     Next: Plan Migration
                     <ChevronRight size={16} />
@@ -209,7 +215,7 @@ export default function MigratePage() {
                 </motion.div>
               </>
             )}
-          </motion.div>
+          </motion.section>
         </div>
       </div>
     </main>

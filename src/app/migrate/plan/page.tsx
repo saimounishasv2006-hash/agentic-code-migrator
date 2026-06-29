@@ -3,10 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useMigrationStore } from "@/store/migrationStore";
+import { ArrowLeft, ChevronRight, Loader } from "lucide-react";
 import { PlanStepper } from "@/components/PlanStepper";
-import { ChevronRight, ArrowLeft, Loader } from "lucide-react";
+import { MigrationPlan, useMigrationStore } from "@/store/migrationStore";
 
+type PlanResponse = MigrationPlan;
+
+/**
+ * Displays the migration plan step of the workflow.
+ */
 export default function PlanPage() {
   const router = useRouter();
   const {
@@ -21,17 +26,26 @@ export default function PlanPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!analysisResult) router.push("/migrate");
+    if (!analysisResult) {
+      router.push("/migrate");
+    }
   }, [analysisResult, router]);
 
+  /**
+   * Sends the analysis result to the plan API and stores the response.
+   */
   const runPlan = async () => {
+    if (!analysisResult) {
+      return;
+    }
+
     setIsPlanning(true);
     setError(null);
     setPhase("planning");
-    addLog("Generating migration plan...");
+    addLog("Generating migration plan.");
 
     try {
-      addLog("Analyzing file dependencies...");
+      addLog("Analyzing file dependencies.");
 
       const response = await fetch("/api/plan", {
         method: "POST",
@@ -46,24 +60,23 @@ export default function PlanPage() {
         throw new Error(`Plan failed: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      addLog(`✓ Created ${data.totalSteps} migration steps`);
-      addLog("✓ Plan ready for execution");
+      const data = (await response.json()) as PlanResponse;
+      addLog(`Created ${data.totalSteps} migration steps.`);
+      addLog("Plan ready for execution.");
 
       setMigrationPlan(data);
-      setPhase("idle");
-      setIsPlanning(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      setError(msg);
-      addLog(`✗ Error: ${msg}`);
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Unknown error";
+      setError(message);
+      addLog(`Error: ${message}`);
+    } finally {
       setPhase("idle");
       setIsPlanning(false);
     }
   };
 
   const handleNext = () => {
-    // Phase 4 (Rewrite) coming next
     router.push("/migrate/rewrite");
   };
 
@@ -73,8 +86,7 @@ export default function PlanPage() {
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-bg via-bg to-surface/30 px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
+      <div className="mx-auto max-w-4xl">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -82,14 +94,14 @@ export default function PlanPage() {
         >
           <button
             onClick={() => router.push("/migrate")}
-            className="flex items-center gap-2 text-text-dim hover:text-accent transition-colors mb-6"
+            className="mb-6 flex items-center gap-2 text-text-dim transition-colors hover:text-accent"
           >
             <ArrowLeft size={16} />
             Back
           </button>
 
           <div>
-            <h1 className="text-3xl font-bold text-text mb-2">
+            <h1 className="mb-2 text-3xl font-bold text-text">
               Migration Plan
             </h1>
             <p className="text-text-dim">
@@ -99,43 +111,41 @@ export default function PlanPage() {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Info Sidebar */}
-          <motion.div
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
+          <motion.aside
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2 }}
-            className="lg:col-span-1 space-y-4"
+            className="space-y-4 lg:col-span-1"
           >
-            <div className="bg-surface/60 border border-border rounded-xl p-4 backdrop-blur h-fit sticky top-8">
-              <p className="text-text-dim text-xs uppercase font-mono tracking-wider mb-3">
+            <div className="h-fit rounded-xl border border-border bg-surface/60 p-4 backdrop-blur sticky top-8">
+              <p className="mb-3 text-xs uppercase tracking-wider font-mono text-text-dim">
                 Analysis Summary
               </p>
               <div className="space-y-2 text-sm">
                 <div>
-                  <p className="text-text-dim text-xs">Files</p>
-                  <p className="text-text font-semibold">
+                  <p className="text-xs text-text-dim">Files</p>
+                  <p className="font-semibold text-text">
                     {analysisResult.totalFiles}
                   </p>
                 </div>
                 <div>
-                  <p className="text-text-dim text-xs">Complexity</p>
-                  <p className="text-accent font-semibold uppercase">
+                  <p className="text-xs text-text-dim">Complexity</p>
+                  <p className="font-semibold uppercase text-accent">
                     {analysisResult.overallComplexity}
                   </p>
                 </div>
                 <div>
-                  <p className="text-text-dim text-xs">Effort</p>
+                  <p className="text-xs text-text-dim">Effort</p>
                   <p className="text-text-dim">
                     {analysisResult.estimatedEffort}
                   </p>
                 </div>
               </div>
             </div>
-          </motion.div>
+          </motion.aside>
 
-          {/* Main Content */}
-          <motion.div
+          <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -145,9 +155,9 @@ export default function PlanPage() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-6"
+                className="mb-6 rounded-xl border border-danger/30 bg-danger/10 p-4"
               >
-                <p className="text-danger text-sm font-medium">{error}</p>
+                <p className="text-sm font-medium text-danger">{error}</p>
               </motion.div>
             )}
 
@@ -155,9 +165,9 @@ export default function PlanPage() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="bg-surface/60 border border-border rounded-xl p-8 backdrop-blur text-center"
+                className="rounded-xl border border-border bg-surface/60 p-8 text-center backdrop-blur"
               >
-                <p className="text-text-dim mb-6">
+                <p className="mb-6 text-text-dim">
                   Ready to generate a migration plan?
                 </p>
                 <motion.button
@@ -165,12 +175,12 @@ export default function PlanPage() {
                   disabled={isPlanning}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isPlanning ? (
                     <>
                       <Loader size={16} className="animate-spin" />
-                      Generating Plan...
+                      Generating plan...
                     </>
                   ) : (
                     <>
@@ -188,30 +198,30 @@ export default function PlanPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1 }}
-                  className="flex gap-4 mt-8"
+                  className="mt-8 flex gap-4"
                 >
                   <button
                     onClick={() => {
                       setMigrationPlan(null);
-                      runPlan();
+                      void runPlan();
                     }}
-                    className="flex-1 px-6 py-3 border border-border text-text rounded-lg hover:border-accent hover:text-accent transition-colors font-medium"
+                    className="flex-1 rounded-lg border border-border px-6 py-3 font-medium text-text transition-colors hover:border-accent hover:text-accent"
                   >
-                    Regenerate Plan
+                    Regenerate plan
                   </button>
                   <motion.button
                     onClick={handleNext}
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
-                    className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 font-semibold text-white transition-colors hover:bg-accent-dim"
                   >
-                    Next: Rewrite Code
+                    Next: Rewrite code
                     <ChevronRight size={16} />
                   </motion.button>
                 </motion.div>
               </>
             )}
-          </motion.div>
+          </motion.section>
         </div>
       </div>
     </main>
