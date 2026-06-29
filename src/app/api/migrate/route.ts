@@ -1,9 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const OLLAMA_API = process.env.OLLAMA_API || "http://localhost:11434";
+const MODEL = "codellama:7b";
+
+async function callOllama(prompt: string): Promise<string> {
+  try {
+    const response = await fetch(`${OLLAMA_API}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL,
+        prompt,
+        stream: false,
+        temperature: 0.5,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.response || "";
+  } catch (error) {
+    throw new Error(`Ollama connection failed. Make sure Ollama is running.`);
+  }
+}
+
+function getNewFileName(
+  originalFileName: string,
+  migrationGoal: string,
+): string {
+  const lowerGoal = migrationGoal.toLowerCase();
+  const isTypeScriptMigration =
+    lowerGoal.includes("typescript") || lowerGoal.includes("to ts");
+
+  if (isTypeScriptMigration) {
+    // .js → .ts
+    if (originalFileName.endsWith(".js")) {
+      return originalFileName.replace(/\.js$/, ".ts");
+    }
+    // .jsx → .tsx
+    if (originalFileName.endsWith(".jsx")) {
+      return originalFileName.replace(/\.jsx$/, ".tsx");
+    }
+    // .mjs → .mts
+    if (originalFileName.endsWith(".mjs")) {
+      return originalFileName.replace(/\.mjs$/, ".mts");
+    }
+    // .cjs → .cts
+    if (originalFileName.endsWith(".cjs")) {
+      return originalFileName.replace(/\.cjs$/, ".cts");
+    }
+  }
+
+  return originalFileName;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,7 +68,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const prompt = `You are a code migration expert. Rewrite the following file to: "${migrationGoal}"
+    const newFileName = getNewFileName(fileName, migrationGoal);
+
+    const prompt = `Rewrite this file for: "${migrationGoal}"
 
 File: ${fileName}
 \`\`\`
@@ -25,19 +79,13 @@ ${fileContent}
 
 Context: ${context}
 
-Output ONLY the rewritten code, no explanations, no markdown fences. Just the pure code.`;
+Output ONLY the rewritten code, no explanations, no markdown.`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const rewrittenCode =
-      message.content[0].type === "text" ? message.content[0].text : "";
+    const rewrittenCode = await callOllama(prompt);
 
     return NextResponse.json({
-      fileName,
+      fileName: newFileName,
+      originalFileName: fileName,
       originalCode: fileContent,
       rewrittenCode,
       success: true,

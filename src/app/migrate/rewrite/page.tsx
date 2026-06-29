@@ -8,6 +8,7 @@ import { ArrowLeft, Loader, Download, Check, X } from "lucide-react";
 
 type RewriteResult = {
   fileName: string;
+  originalFileName: string;
   originalCode: string;
   rewrittenCode: string;
   success: boolean;
@@ -63,7 +64,19 @@ export default function RewritePage() {
 
         const result = await response.json();
         setResults((prev) => [...prev, result]);
-        addLog(`✓ Rewritten ${file.name}`);
+
+        // Store in sessionStorage for next phases
+        const stored = JSON.parse(
+          sessionStorage.getItem("rewrittenFiles") || "{}",
+        );
+        stored[result.fileName] = result.rewrittenCode;
+        sessionStorage.setItem("rewrittenFiles", JSON.stringify(stored));
+
+        addLog(
+          `✓ Rewritten ${file.name}${
+            result.fileName !== file.name ? ` → ${result.fileName}` : ""
+          }`,
+        );
       }
 
       addLog("✓ All files rewritten!");
@@ -78,7 +91,17 @@ export default function RewritePage() {
     }
   };
 
-  const downloadFiles = () => {
+  const downloadFile = (result: RewriteResult) => {
+    const element = document.createElement("a");
+    const file = new Blob([result.rewrittenCode], { type: "text/plain" });
+    element.href = URL.createObjectURL(file);
+    element.download = result.fileName;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const downloadAllFiles = () => {
     results.forEach((result) => {
       const element = document.createElement("a");
       const file = new Blob([result.rewrittenCode], { type: "text/plain" });
@@ -116,7 +139,7 @@ export default function RewritePage() {
           <div>
             <h1 className="text-3xl font-bold text-text mb-2">Rewrite Code</h1>
             <p className="text-text-dim">
-              Using Claude API to migrate{" "}
+              Migrating{" "}
               <span className="text-accent">{files.length} files</span>
             </p>
           </div>
@@ -170,7 +193,7 @@ export default function RewritePage() {
             className="bg-surface/60 border border-border rounded-xl p-8 backdrop-blur text-center"
           >
             <p className="text-text-dim mb-6">
-              Ready to rewrite {files.length} files using Claude API?
+              Ready to rewrite {files.length} files?
             </p>
             <motion.button
               onClick={startRewrite}
@@ -179,7 +202,7 @@ export default function RewritePage() {
               className="inline-flex items-center gap-2 px-8 py-4 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
             >
               Start Rewriting
-              <Loader size={16} className="animate-spin" />
+              <Loader size={16} />
             </motion.button>
           </motion.div>
         ) : (
@@ -197,33 +220,40 @@ export default function RewritePage() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1">
                     {result.success ? (
-                      <Check size={20} className="text-success" />
+                      <Check size={20} className="text-success flex-shrink-0" />
                     ) : (
-                      <X size={20} className="text-danger" />
+                      <X size={20} className="text-danger flex-shrink-0" />
                     )}
-                    <span className="font-mono text-text font-medium">
-                      {result.fileName}
-                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-text font-medium">
+                          {result.originalFileName}
+                        </span>
+                        {result.fileName !== result.originalFileName && (
+                          <>
+                            <span className="text-text-dim">→</span>
+                            <span className="font-mono text-accent font-medium">
+                              {result.fileName}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-text-dim text-xs mt-1">
+                        {result.rewrittenCode.length} bytes
+                      </p>
+                    </div>
                   </div>
                   {result.success && (
-                    <button
-                      onClick={() => {
-                        const element = document.createElement("a");
-                        const file = new Blob([result.rewrittenCode], {
-                          type: "text/plain",
-                        });
-                        element.href = URL.createObjectURL(file);
-                        element.download = result.fileName;
-                        document.body.appendChild(element);
-                        element.click();
-                        document.body.removeChild(element);
-                      }}
-                      className="p-2 hover:bg-success/20 rounded-lg transition-colors"
+                    <motion.button
+                      onClick={() => downloadFile(result)}
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      className="p-2 hover:bg-success/20 rounded-lg transition-colors flex-shrink-0"
                     >
                       <Download size={16} className="text-success" />
-                    </button>
+                    </motion.button>
                   )}
                 </div>
                 {result.error && (
@@ -249,13 +279,13 @@ export default function RewritePage() {
                   Start Over
                 </button>
                 <motion.button
-                  onClick={downloadFiles}
+                  onClick={downloadAllFiles}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-accent hover:bg-accent-dim text-white rounded-lg font-semibold transition-colors"
                 >
                   <Download size={16} />
-                  Download All Files
+                  Download All
                 </motion.button>
               </motion.div>
             )}

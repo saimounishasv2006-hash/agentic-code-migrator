@@ -29,6 +29,22 @@ async function callOllama(prompt: string): Promise<string> {
   }
 }
 
+function cleanJSON(jsonString: string): string {
+  // Remove single-line comments (// ...)
+  let cleaned = jsonString.replace(/\/\/.*$/gm, "");
+
+  // Remove multi-line comments (/* ... */)
+  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, "");
+
+  // Remove trailing commas before } and ]
+  cleaned = cleaned.replace(/,\s*([}\]])/g, "$1");
+
+  // Clean up extra whitespace
+  cleaned = cleaned.replace(/\s+/g, " ");
+
+  return cleaned;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { analysis, migrationGoal } = await req.json();
@@ -51,7 +67,7 @@ Analysis Summary:
 - Patterns: ${analysis.codePatterns.join(", ")}
 - Complexity: ${analysis.overallComplexity}
 
-Create an ordered migration plan. Respond ONLY with valid JSON (no markdown):
+Create an ordered migration plan. Respond ONLY with valid JSON (no comments, no markdown):
 {
   "steps": [
     {
@@ -59,10 +75,7 @@ Create an ordered migration plan. Respond ONLY with valid JSON (no markdown):
       "title": "Step title",
       "description": "What to do",
       "affectedFiles": ["file1.js", "file2.js"],
-      "changes": [
-        "Change 1: description",
-        "Change 2: description"
-      ],
+      "changes": ["Change 1: description", "Change 2: description"],
       "reasoning": "Why this order matters",
       "estimatedTime": "15 mins"
     }
@@ -76,10 +89,21 @@ Create an ordered migration plan. Respond ONLY with valid JSON (no markdown):
 
     if (!jsonMatch) {
       console.error("Ollama response:", responseText);
-      throw new Error("Failed to parse plan as JSON");
+      throw new Error("Failed to find JSON in response");
     }
 
-    const plan = JSON.parse(jsonMatch[0]);
+    // Clean the JSON before parsing
+    const cleanedJSON = cleanJSON(jsonMatch[0]);
+
+    let plan;
+    try {
+      plan = JSON.parse(cleanedJSON);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      console.error("Cleaned JSON:", cleanedJSON);
+      throw new Error("Failed to parse plan as valid JSON");
+    }
+
     return NextResponse.json(plan);
   } catch (error) {
     console.error("Plan error:", error);
